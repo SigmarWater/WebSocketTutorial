@@ -1,9 +1,8 @@
 package main
 
 import (
-	"log"
-
 	"github.com/SigmarWater/WebSocketTutorial/internal/wsserver"
+	log "github.com/sirupsen/logrus"
 )
 
 const(
@@ -12,8 +11,8 @@ const(
 
 func main(){
 	wsSrv := wsserver.NewWsServer(addr)
-	log.Printf("Started ws server on: %v\n", addr)
+	log.Infof("Started ws server on: %v", addr)
 	if err := wsSrv.Start(); err != nil{
-		log.Fatalf("Error with ws server: %v", err)
+		log.Errorf("Error with ws server: %v", err)
 	}
 }
