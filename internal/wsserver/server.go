@@ -1,10 +1,14 @@
 package wsserver
 
 import (
+	"net"
 	"net/http"
+	"sync"
+
 	log "github.com/sirupsen/logrus"
 
 	"github.com/gorilla/websocket"
+	"time"
 )
 
 const(
@@ -21,6 +25,12 @@ type wsSrv struct {
 	srv *http.Server
 	// upgrader для http-запросов
 	wsUpg *websocket.Upgrader
+	// Сессии - подключенные клиенты
+	wsClients map[*websocket.Conn]struct{}
+	// Мьютекс для защиты мапы
+	mutex *sync.RWMutex
+	// Канал для рассылки сообщений
+	broadcast chan *wsMessage
 }
 
 func NewWsServer(addr string) WSServer {
@@ -33,6 +43,10 @@ func NewWsServer(addr string) WSServer {
 		},
 		mux: mux,
 		wsUpg: &websocket.Upgrader{},
+		wsClients: make(map[*websocket.Conn]struct{}),
+		mutex: &sync.RWMutex{},
+		// Используем указатель для того, чтобы экономить память, используя указатель, а не копировать структуру
+		broadcast: make(chan *wsMessage),
 	}
 }
 
@@ -59,6 +73,43 @@ func (ws *wsSrv) wsHandler(w http.ResponseWriter, r *http.Request){
 		return 
 	}
 
-	// Вывод IP адреса клиента, который подключается к серверу
-	log.Infof(conn.RemoteAddr().String())
+	log.Infof("Client with address %s connected", conn.RemoteAddr().String())
+
+	ws.mutex.Lock()
+	ws.wsClients[conn] = struct{}{}
+	ws.mutex.Unlock()
+
+	go ws.readFromClient(conn)
 }	
+
+// Функция считывающая сообщения из каждого коннекта
+func (ws *wsSrv) readFromClient(conn *websocket.Conn){
+	for{
+		// Выделяем память под структуру wsMessage и возвращает указатель на эту область памяти
+		msg := new(wsMessage)
+
+		// Читаем JSON в структуру msg
+		if err := conn.ReadJSON(msg); err != nil{
+				log.Errorf("Error with reading from WebSocket: %v", err)
+				break 
+		}
+
+		// Получаем только порт
+		host, _, err :=  net.SplitHostPort(conn.LocalAddr().String())
+		if err != nil{
+			log.Errorf("Error with address split: %v", err)
+		}
+
+		// Обогощаем сообщение
+		msg.IPAdress = host 
+		msg.Time = time.Now().Format("10:00")
+
+		// Отправляем в канал
+		ws.broadcast <- msg 
+	}
+
+	// Если случилась ошибка при чтении, то удаляем этот connection
+	ws.mutex.Lock()
+	delete(ws.wsClients, conn)
+	ws.mutex.Unlock()
+}
