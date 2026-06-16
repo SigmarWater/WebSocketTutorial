@@ -12,8 +12,8 @@ import (
 )
 
 const(
-	templateDir = "../../web/templates/html"
-	staticDir = "../../web/static/"
+	templateDir = "./web/templates/html"
+	staticDir = "./web/static/"
 )
 
 type WSServer interface {
@@ -58,6 +58,7 @@ func (ws *wsSrv) Start() error{
 	// Путь для подключения по websocket
 	ws.mux.HandleFunc("/ws", ws.wsHandler)
 	ws.mux.HandleFunc("/test", ws.testHandler)
+	go ws.writeToClientsBroadCast()
 	return ws.srv.ListenAndServe()
 }
 
@@ -102,7 +103,7 @@ func (ws *wsSrv) readFromClient(conn *websocket.Conn){
 
 		// Обогощаем сообщение
 		msg.IPAdress = host 
-		msg.Time = time.Now().Format("10:00")
+		msg.Time = time.Now().Format(time.RFC1123)
 
 		// Отправляем в канал
 		ws.broadcast <- msg 
@@ -112,4 +113,18 @@ func (ws *wsSrv) readFromClient(conn *websocket.Conn){
 	ws.mutex.Lock()
 	delete(ws.wsClients, conn)
 	ws.mutex.Unlock()
+}
+
+func (ws *wsSrv) writeToClientsBroadCast(){
+	for msg := range ws.broadcast{
+		ws.mutex.RLock()
+		for clients := range ws.wsClients{
+			go func(){
+				if err := clients.WriteJSON(msg); err != nil{
+					log.Errorf("Error with writing message: %v", err)
+				}
+			}()
+		}
+		ws.mutex.RUnlock()
+	}
 }

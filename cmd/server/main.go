@@ -6,7 +6,7 @@ import (
 )
 
 const(
-	addr = "localhost:9090"
+	addr = "0.0.0.0:9090"
 )
 
 func main(){
