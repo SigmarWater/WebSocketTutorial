@@ -1,14 +1,16 @@
 package wsserver
 
 import (
+	"context"
 	"net"
 	"net/http"
 	"sync"
 
 	log "github.com/sirupsen/logrus"
 
-	"github.com/gorilla/websocket"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const(
@@ -18,6 +20,7 @@ const(
 
 type WSServer interface {
 	Start() error
+	Stop() error 
 }
 
 type wsSrv struct {
@@ -62,6 +65,26 @@ func (ws *wsSrv) Start() error{
 	return ws.srv.ListenAndServe()
 }
 
+func (ws *wsSrv) Stop() error{
+	log.Info("Before", ws.wsClients)
+	
+	close(ws.broadcast)
+
+	ws.mutex.RLock()
+	for conn := range ws.wsClients{
+		// Закрываем соединение
+		if err := conn.Close(); err != nil{
+			log.Errorf("Error with closing: %v", err)
+		}
+		delete(ws.wsClients, conn)
+	}
+	ws.mutex.RUnlock()
+
+	log.Info("After close", ws.wsClients)
+
+	return ws.srv.Shutdown(context.Background())
+}
+
 func (ws *wsSrv) testHandler(w http.ResponseWriter, r *http.Request){
 	w.Write([]byte("Test is successful"))
 }
@@ -91,8 +114,14 @@ func (ws *wsSrv) readFromClient(conn *websocket.Conn){
 
 		// Читаем JSON в структуру msg
 		if err := conn.ReadJSON(msg); err != nil{
-				log.Errorf("Error with reading from WebSocket: %v", err)
-				break 
+			// Если мы не читаем, только из-за завершения работы сервера, то просто break
+				if websocket.IsUnexpectedCloseError(err,
+				websocket.CloseGoingAway,
+				websocket.CloseNormalClosure,
+				) {
+				log.Errorf("Unexpected WebSocket error: %v", err)
+				}
+				break
 		}
 
 		// Получаем только порт
